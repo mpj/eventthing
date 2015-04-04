@@ -16,11 +16,12 @@ var inspector = function(x) {
 Q.longStackSupport = true;
 
 // Mocha swallows errors
-/*
-process.on('uncaughtException', function (error) {
-  console.log('Uncaught error ----\n', error.stack,'\n-------------------\n');
-})*/
-
+if(!process.handlerAdded) {
+  process.handlerAdded = true;
+  process.on('uncaughtException', function (error) {
+    console.log('Uncaught error ----\n', error.message, error.stack,'\n-------------------\n');
+  })
+}
 describe('when we have a database', function() {
   var db;
   beforeEach(function(done) {
@@ -45,7 +46,7 @@ describe('when we have a database', function() {
     setTimeout(function() {
       thing.push({
         hello: 'world'
-      })
+      }).done()
     }, 200)
 
   })
@@ -108,7 +109,7 @@ describe('when we have a database', function() {
 
     it('does not stream past space', function(done) {
       var thing = EventThing(db)
-      _(thing.subscribe()).through(await.not({ _id: 3})).pull(function(){})
+      _(thing.subscribe()).through(await.not({ hello: 3})).each(function(){})
       setTimeout(done, 100)
     })
   })

@@ -2,6 +2,7 @@ var Q = require('q')
 var _ = require('highland')
 var prop = require('mout/function/prop')
 var inspector = function (name) {
+  name = name || 'inspectooor'
   return function(x) {
     console.log('inspecting', name+':', x)
     return x;
@@ -29,7 +30,7 @@ var EventThing = function(db) {
   function getCollection() {
     if (!state.whenCollection) {
       var deferred = Q.defer();
-      db.createCollection('eventlog', { capped: true, size: 100000, strict: true }, function(error, result) {
+      db.createCollection('eventlog', {strict: true}, function(error, result) {
         if (!!error) {
           var alreadyExists =
             error.code === 48 ||
@@ -41,7 +42,14 @@ var EventThing = function(db) {
           }
           // already created
         } else {
-          // TODO: Multiple pieces of code trying to create?
+
+          var whenDispatch =
+            Q.ninvoke(
+              db,
+              'createCollection',
+              'eventdispatch',
+              { capped: true, size: 100000, strict: true });
+
           var whenInitialEvent = Q.ninvoke(db.collection('eventlog'), 'insert', {
             initialEvent: true,
             _id: 0
@@ -51,8 +59,12 @@ var EventThing = function(db) {
             seq: 0
           });
 
-          Q.all([whenInitialEvent, whenOrdinalCounter]).then(function() {
-            deferred.resolve()
+          Q.all([whenDispatch, whenInitialEvent, whenOrdinalCounter]).then(function() {
+            syncToDispatch()
+            setTimeout(function() {
+              deferred.resolve()
+            }, 100)
+
           })
           .done()
         }
@@ -63,6 +75,23 @@ var EventThing = function(db) {
     return state.whenCollection.then(function(){
       return db.collection('eventlog')
     });
+  }
+
+  function syncToDispatch() {
+    db
+      .collection('eventdispatch')
+      .find({})
+      .sort({ $natural: -1})
+      .limit(1)
+      .nextObject(function(err, latest) {
+        var latestDispatchedOrdinal = !!latest ? latest._id : -1;
+        var filter = { _id : { '$gt': latestDispatchedOrdinal } };
+        var str = db.collection('eventlog').find(filter).sort({ _id: 1}).stream();
+        str.resume();
+        _(str).each(function(x) {
+          db.collection('eventdispatch').insert(x)
+        })
+      })
   }
 
   return {
@@ -78,8 +107,26 @@ var EventThing = function(db) {
           filter._id = { '$gte': opts.offset };
 
         var bodyStream = coll.find(filter).stream();
-        bodyStream.pipe(out, { end: false });
+        bodyStream.resume()
         var lastEnvelope = null;
+        var chainIsBroken = false;
+        _(bodyStream).filter(function(x) {
+          var chainIsBroken =
+            chainIsBroken ||
+            (lastEnvelope !== null &&
+            lastEnvelope._id !== x._id-1);
+          if (!chainIsBroken) {
+            lastEnvelope = x;
+            return true;
+          } else {
+            return false
+          }
+        }).on('data', function(d) {
+          out.write(d)
+        })
+
+
+
         out.observe().each(function(x) {
           lastEnvelope = x;
         })
@@ -93,7 +140,7 @@ var EventThing = function(db) {
             awaitdata: true,
             numberOfRetries: -1
           }
-          var tailStream = coll
+          var tailStream = db.collection('eventdispatch')
             .find(filter, options)
             .stream()
           tailStream.resume();
@@ -119,7 +166,10 @@ var EventThing = function(db) {
                 body: evt
               }, deferred.makeNodeResolver())
               return  deferred.promise;
-            });
+            })
+            .then(function() {
+              syncToDispatch();
+            })
         })
 
     }
