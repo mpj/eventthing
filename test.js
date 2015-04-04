@@ -112,6 +112,13 @@ describe('when we have a database', function() {
       _(thing.subscribe()).through(await.not({ hello: 3})).each(function(){})
       setTimeout(done, 100)
     })
+
+    it('but when it is inserted, and another event comes in', function(done) {
+      var thing = EventThing(db)
+      _(thing.subscribe()).through(await([{ hello: 2}, {hello: 3},{hello: 4}])).each(function(){})
+      thing.push({ hello: 4})
+      setTimeout(done, 100)
+    })
   })
 
 

@@ -153,9 +153,6 @@ var EventThing = function(db) {
 
     },
     push: function(evt) {
-      // FIXME: This approach will mean that the natrual and ordinal order
-      // of events will diverge, and that item 5 might be inserted before item 4.
-      // We have to make sure that the subscribe stream compensates for this
       return getCollection()
         .then(function(coll) {
           return getNextSequence('eventlog-ordinal')
