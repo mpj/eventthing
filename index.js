@@ -27,48 +27,65 @@ var EventThing = function(db) {
     })
   }
 
+  function ensureCollection(name, opts) {
+    opts = opts || {}
+    var deferred = Q.defer();
+    db.createCollection(name, opts, function(err) {
+      if (err)
+        deferred.reject(err);
+      else
+        deferred.resolve(db.collection(name));
+    });
+    return deferred.promise;
+  }
+
+  function insert(collectionName, document) {
+    var deferred = Q.defer();
+    db.collection(collectionName).insert(document, deferred.makeNodeResolver())
+    return deferred.promise;
+  }
+
   function getCollection() {
-    if (!state.whenCollection) {
+    if(!state.whenCollection) {
+
       var deferred = Q.defer();
-      db.createCollection('eventlog', {strict: true}, function(error, result) {
-        if (!!error) {
-          var alreadyExists =
-            error.code === 48 ||
-            error.message === 'Collection eventlog already exists. Currently in strict mode.';
-          if (alreadyExists) {
-            deferred.resolve();
-          } else {
+
+      var eventLogPromise =
+        ensureCollection('eventlog')
+          .then(function() {
+            return insert('eventlog', {
+              body: {initialEvent: true},
+              _id: 0
+            })
+          }).fail(function (error) {
+            var isDupe = error.code === 11000;
+            if (isDupe) return true;
             throw error;
-          }
-          // already created
-        } else {
-
-          var whenDispatch =
-            Q.ninvoke(
-              db,
-              'createCollection',
-              'eventdispatch',
-              { capped: true, size: 100000, strict: true });
-
-          var whenInitialEvent = Q.ninvoke(db.collection('eventlog'), 'insert', {
-            initialEvent: true,
-            _id: 0
-          });
-          var whenOrdinalCounter = Q.ninvoke(db.collection('counters'), 'insert', {
-            _id: "eventlog-ordinal",
-            seq: 0
-          });
-
-          Q.all([whenDispatch, whenInitialEvent, whenOrdinalCounter]).then(function() {
-            syncToDispatch()
-            setTimeout(function() {
-              deferred.resolve()
-            }, 100)
-
           })
-          .done()
-        }
-      })
+      var eventDispatchPromise =
+        ensureCollection('eventdispatch', { capped: true, size: 100000 })
+          .then(function() {
+            return insert('eventdispatch', {
+              body: {initialEvent: true},
+              _id: 0
+            })
+          })
+          .fail(function (error) {
+            var isDupe = error.code === 11000;
+            if (isDupe) return true;
+            throw error;
+          })
+      var whenOrdinalCounter = insert('counters', {
+        _id: "eventlog-ordinal",
+        seq: 0
+      }).fail(function (error) {
+        var isDupe = error.code === 11000;
+        if (isDupe) return true;
+        throw error;
+      });
+      Q.all([eventLogPromise, eventDispatchPromise,whenOrdinalCounter]).then(function() {
+        deferred.resolve()
+      }).done()
       state.whenCollection = deferred.promise;
     }
 
@@ -106,7 +123,6 @@ var EventThing = function(db) {
         if (!!opts.offset)
           filter._id = { '$gte': opts.offset };
 
-
         var bodyStream = coll.find(filter)
           .sort({ _id: 1})
           .stream();
@@ -136,6 +152,7 @@ var EventThing = function(db) {
 
         bodyStream.on('end', function(x) {
 
+
           if (!!lastEnvelope)
             filter._id =  {$gt: lastEnvelope._id};
           var options = {
@@ -146,7 +163,11 @@ var EventThing = function(db) {
           var tailStream = db.collection('eventdispatch')
             .find(filter, options)
             .stream()
+
           tailStream.resume();
+          tailStream.on('data', function(x) {
+            out.write(x)
+          })
           tailStream.pipe(out);
 
         })

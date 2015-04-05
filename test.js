@@ -33,18 +33,15 @@ describe('when we have a database', function() {
 
   var db;
   beforeEach(function(done) {
-    var url = 'mongodb://localhost:27017/test-'+Math.floor(Math.random()*100000);
+    var url = 'mongodb://localhost:27017/test-'+Math.floor(Math.random()*10000000);
     MongoClient.connect(url, function(err, x) {
       db = x;
       done()
     });
   })
 
-  afterEach(function(done) {
-    db.dropDatabase(function() {
-      db.close()
-      done()
-    });
+  afterEach(function() {
+    db.dropDatabase();
   })
 
 
@@ -54,10 +51,11 @@ describe('when we have a database', function() {
       .through(await({ hello: 'world'}))
       .pull(done)
     setTimeout(function() {
+      console.log("writing");
       thing.push({
         hello: 'world'
       }).done()
-    }, 200)
+    }, 100)
 
   })
 
@@ -88,7 +86,7 @@ describe('when we have a database', function() {
         { hello: 0 }
       ])).each(function() {})
     })
-    setTimeout(done, 1000)
+    setTimeout(done, 250)
   })
 
   it('retains state', function(done) {
@@ -99,7 +97,6 @@ describe('when we have a database', function() {
         { hello: 0 }
       ])).pull(done);
     })
-
   })
 
 
@@ -148,7 +145,7 @@ describe('when we have a database', function() {
       db.collection('eventlog').insert({ _id: 3, body: { hello: 3 } })
       db.collection('eventlog').insert({ _id: 2, body: { hello: 2 } })
       db.collection('eventdispatch').insert({ _id: 0, body: { hello: 0 } })
-      setTimeout(done, 100)
+      setTimeout(done, 250)
     })
 
     it('should return in order', function(done) {
