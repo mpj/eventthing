@@ -6,11 +6,16 @@ var find = require('mout/array/find')
 var remove = require('mout/array/remove')
 var isArray = require('mout/lang/isArray')
 var partial = require('mout/function/partial')
+var prop = require('mout/function/prop')
 var _ = require('highland')
 var Q = require('q')
-var inspector = function(x) {
-  console.log('inspecting:', x)
-  return x;
+var inspector = function(name, thunk) {
+  name = name || 'untitled';
+  var thr = _()
+  thr[thunk ? 'fork' : 'observe']().each(function(x) {
+    console.log("[INSPECTING / " + name + "]", x)
+  })
+  return thr;
 }
 
 Q.longStackSupport = true;
@@ -23,6 +28,9 @@ if(!process.handlerAdded) {
   })
 }
 describe('when we have a database', function() {
+
+  this.timeout(4000);
+
   var db;
   beforeEach(function(done) {
     var url = 'mongodb://localhost:27017/test-'+Math.floor(Math.random()*100000);
@@ -33,8 +41,10 @@ describe('when we have a database', function() {
   })
 
   afterEach(function(done) {
-    db.dropDatabase();
-    done()
+    db.dropDatabase(function() {
+      db.close()
+      done()
+    });
   })
 
 
@@ -95,10 +105,16 @@ describe('when we have a database', function() {
 
   describe('items with space is in the event-log', function() {
     beforeEach(function(done) {
+      Q.ninvoke(db.collection('counters'), 'insert', {
+        _id: "eventlog-ordinal",
+        seq: 0
+      })
       db.collection('eventlog').insert({ _id: 0, body: { hello: 0 } })
       db.collection('eventlog').insert({ _id: 1, body: { hello: 1 } })
       db.collection('eventlog').insert({ _id: 3, body: { hello: 3 } })
-      setTimeout(done, 50)
+      db.collection('eventdispatch').insert({ _id: 0, body: { hello: 0 } })
+      db.collection('eventdispatch').insert({ _id: 1, body: { hello: 1 } })
+      setTimeout(done, 100)
     })
 
     it('streams the unbroken block', function(done) {
@@ -121,6 +137,34 @@ describe('when we have a database', function() {
     })
   })
 
+  describe('items out of order is in eventlog collection', function() {
+    beforeEach(function(done) {
+      Q.ninvoke(db.collection('counters'), 'insert', {
+        _id: "eventlog-ordinal",
+        seq: 0
+      })
+      db.collection('eventlog').insert({ _id: 1, body: { hello: 1 } })
+      db.collection('eventlog').insert({ _id: 0, body: { hello: 0 } })
+      db.collection('eventlog').insert({ _id: 3, body: { hello: 3 } })
+      db.collection('eventlog').insert({ _id: 2, body: { hello: 2 } })
+      db.collection('eventdispatch').insert({ _id: 0, body: { hello: 0 } })
+      setTimeout(done, 100)
+    })
+
+    it('should return in order', function(done) {
+      var thing = EventThing(db)
+      _(thing.subscribe())
+        .batch(4)
+        //.pipe(inspector('what', true))
+        .each(function(x) {
+          assert.deepEqual(x.map(prop('hello')),
+            [0,1,2,3])
+          done()
+        })
+    })
+
+
+  })
 
 
   var awaitGeneric = _.curry(function await(expect, patterns, stream) {

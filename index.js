@@ -106,12 +106,15 @@ var EventThing = function(db) {
         if (!!opts.offset)
           filter._id = { '$gte': opts.offset };
 
-        var bodyStream = coll.find(filter).stream();
-        bodyStream.resume()
+
+        var bodyStream = coll.find(filter)
+          .sort({ _id: 1})
+          .stream();
+        bodyStream.resume();
         var lastEnvelope = null;
         var chainIsBroken = false;
         _(bodyStream).filter(function(x) {
-          var chainIsBroken =
+          chainIsBroken =
             chainIsBroken ||
             (lastEnvelope !== null &&
             lastEnvelope._id !== x._id-1);
@@ -132,9 +135,9 @@ var EventThing = function(db) {
         })
 
         bodyStream.on('end', function(x) {
+
           if (!!lastEnvelope)
             filter._id =  {$gt: lastEnvelope._id};
-
           var options = {
             tailable: true,
             awaitdata: true,
@@ -144,7 +147,7 @@ var EventThing = function(db) {
             .find(filter, options)
             .stream()
           tailStream.resume();
-          _(tailStream).pipe(out);
+          tailStream.pipe(out);
 
         })
 
