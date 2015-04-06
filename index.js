@@ -1,6 +1,7 @@
 var Q = require('q')
 var _ = require('highland')
 var prop = require('mout/function/prop')
+var debounce = require('just-debounce')
 var inspector = function (name) {
   name = name || 'inspectooor'
   return function(x) {
@@ -94,9 +95,9 @@ var EventThing = function(db) {
     });
   }
 
+  var total = 0;
   function syncToDispatch() {
     var deferred = Q.defer();
-
     db
       .collection('eventdispatch')
       .find({})
@@ -104,33 +105,35 @@ var EventThing = function(db) {
       .limit(1)
       .nextObject(function(err, latest) {
 
+        var restStart = Number(new Date());
         var latestDispatchedOrdinal = !!latest ? latest._id : -1;
         var filter = { _id : { '$gt': latestDispatchedOrdinal } };
-        var str = db.collection('eventlog').find(filter).sort({ _id: 1}).stream();
-        var insertionPromises = [];
-        str.on('end', function() {
-          Q.all(insertionPromises).then(function() {
-            deferred.resolve();
-          }).done()
-        })
-        str.resume();
-        _(str).each(function(x) {
-          var whenInserted = Q.defer();
-          insertionPromises.push(whenInserted.promise.fail(function(err) {
-            var isDupe = err.code === 11000;
-            if (isDupe) return true; // ignore these
-            throw err;
-          }))
-          // FIXME I'm pretty sure that we can accidentally cause space
-          // in the sequence here if we don't check that the top item on
-          // stack is the prev id
-          db.collection('eventdispatch').insert(x, whenInserted.makeNodeResolver());
-        })
+        db.collection('eventlog').find(filter).sort({ _id: 1}).toArray(function(err, result) {
+          result = result.reduce(function(prev, cur, index, arr) {
+            if(prev.length === 0 || prev[prev.length-1]._id === cur._id-1)
+              prev.push(cur);
+            return prev;
+          },[]);
 
+          if (result.length > 0) {
+            db
+              .collection('eventdispatch')
+              .find({})
+              .sort({ $natural: -1})
+              .limit(1)
+              .nextObject(function(err, latest) {
+                db.collection('eventdispatch').insert(result, {ordered: true}, function() {
+                  deferred.resolve()
+                });
+            })
+          } else {
+            deferred.resolve()
+          }
+        })
       })
     return deferred.promise;
-
   }
+
 
   return {
     subscribe: function(opts) {
@@ -170,7 +173,6 @@ var EventThing = function(db) {
         })
 
         function startTailing() {
-          // FIXME:
           if (!!lastEnvelope)
             filter._id =  {$gte: lastEnvelope._id};
           var options = {

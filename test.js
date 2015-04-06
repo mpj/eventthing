@@ -3,6 +3,7 @@ var MongoClient = require('mongodb').MongoClient;
 var assert = require('assert')
 var deepMatches = require('mout/object/deepMatches')
 var find = require('mout/array/find')
+var range = require('mout/array/range')
 var remove = require('mout/array/remove')
 var isArray = require('mout/lang/isArray')
 var partial = require('mout/function/partial')
@@ -29,16 +30,19 @@ if(!process.handlerAdded) {
 }
 describe('when we have a database', function() {
 
-  this.timeout(4000);
+  this.timeout(8000);
 
   var db;
   before(function(done) {
-    var rid = Math.floor(Math.random()*10000000);
-    var url = 'mongodb://localhost:27017/test-'+rid;
+    var url = 'mongodb://localhost:27017/test-unit';
     MongoClient.connect(url, function(err, x) {
       db = x;
       done()
     });
+  })
+  after(function() {
+    /*try {db.close(function() {}) }
+    catch(err) {}*/
   })
 
   beforeEach(function(done) {
@@ -111,7 +115,8 @@ describe('when we have a database', function() {
       thing.push({ hello: 1 }),
       thing.push({ hello: 2 }),
     ]).then(function() {
-      _(thing.subscribe({})).through(await([
+      _(thing.subscribe({}))
+      .through(await([
         { hello: 0 },
         { hello: 1 },
         { hello: 2 }
@@ -197,7 +202,6 @@ describe('when we have a database', function() {
       var thing = EventThing(db)
       _(thing.subscribe())
         .batch(4)
-        //.pipe(inspector('what', true))
         .each(function(x) {
           assert.deepEqual(x.map(prop('hello')),
             [0,1,2,3])
@@ -205,9 +209,46 @@ describe('when we have a database', function() {
         })
     })
 
-
   })
 
+  it('performs ok', function(done) {
+    this.timeout(50000);
+    var thing = EventThing(db)
+    thing.push({ whatever: 1}).then(function() {
+
+      var count = 100;
+      var received = 0;
+      var start = null;
+      var insertTime = 0;
+      thing.subscribe({}).each(function() {
+        received++;
+        if (received === count) {
+          var end = Number(new Date());
+          var totalTime = end-start;
+          var msPerMessage = totalTime/count;
+          assert(msPerMessage < 30);
+          /*
+          console.log(
+            "Received", count, "messages in",
+            totalTime, "ms which means",
+            msPerMessage, "ms per message")
+*/
+          done();
+        }
+      })
+
+      setTimeout(function() {
+        _(range(count)).map(function(i) {
+          return { hello: i}
+        })
+        .each(function (x){
+          thing.push(x).then(function() {
+            insertTime += (insertEnd-insertStart);
+          })
+        })
+      }, 1000)
+    }).done()
+  })
 
   var awaitGeneric = _.curry(function await(expect, patterns, stream) {
     if (!isArray(patterns)) patterns = [ patterns ];
