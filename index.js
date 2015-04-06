@@ -96,43 +96,46 @@ var EventThing = function(db) {
   }
 
   function syncToDispatch() {
-    var deferred = Q.defer();
+    return Q.ninvoke(
+      db
+        .collection('eventdispatch')
+        .find({})
+        .sort({ $natural: -1})
+        .limit(1), 'nextObject')
+    .then(function(latest) {
+      var latestDispatchedOrdinal = !!latest ? latest._id : -1;
+      var filter = { _id : { '$gt': latestDispatchedOrdinal } };
+      return Q.ninvoke(
+        db.collection('eventlog').find(filter).sort({ _id: 1}), 'toArray');
+    })
+    .then(function(result) {
+      // Create an unbroken chain, throw away items after gap
+      // i.e. 0,1,2,4,5 becomes 0,1,2
+      result = result.reduce(function(prev, cur, index, arr) {
+        if(prev.length === 0 || prev[prev.length-1]._id === cur._id-1)
+          prev.push(cur);
+        return prev;
+      }, []);
 
-    db
-      .collection('eventdispatch')
-      .find({})
-      .sort({ $natural: -1})
-      .limit(1)
-      .nextObject(function(err, latest) {
-        var latestDispatchedOrdinal = !!latest ? latest._id : -1;
-        var filter = { _id : { '$gt': latestDispatchedOrdinal } };
-        db.collection('eventlog').find(filter).sort({ _id: 1}).toArray(function(err, result) {
-          if (err) return deferred.reject(err);
-          result = result.reduce(function(prev, cur, index, arr) {
-            if(prev.length === 0 || prev[prev.length-1]._id === cur._id-1)
-              prev.push(cur);
-            return prev;
-          },[]);
-
-          if (result.length > 0) {
-            db
-              .collection('eventdispatch')
-              .find({})
-              .sort({ $natural: -1})
-              .limit(1)
-              .nextObject(function(err, latest) {
-                db.collection('eventdispatch').insert(result, {ordered: true}, function() {
-                  deferred.resolve()
-                });
-            })
-          } else {
-            deferred.resolve()
-          }
+      if (result.length === 0) {
+        // No work needs to be done
+        return true
+      } else {
+        return Q.ninvoke(
+          db.collection('eventdispatch'),
+          'insert',
+          result,
+          { ordered: true }
+        ).fail(function(error) {
+          var isDupe = error.code === 11000;
+          if (isDupe) return true;
+          throw error;
         })
-      })
-    return deferred.promise;
+      }
+    }).then(function() {
+      return true
+    })
   }
-
 
   return {
     subscribe: function(opts) {
