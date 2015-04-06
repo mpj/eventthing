@@ -136,7 +136,7 @@ var EventThing = function(db) {
       var lastEnvelopeOut = null;
       out.observe().each(function(x) { lastEnvelopeOut = x; })
 
-      // outWithBrokenChainFilter - astream that writes to out,
+      // outWithBrokenChainFilter - a stream that writes to out,
       // but that first filters out items that would break the chain.
       // I.e. if an event with an _id of 4 has just been written,
       // 5 can be written afterwards, but 6 would be filtered out unless
@@ -157,10 +157,13 @@ var EventThing = function(db) {
         return strm;
       })();
 
-      // Tailing for a query that returns 0
-      // will result in a dead cursor - instead, we use a $gte instead
-      // of $gt which will create tail that will return the doc we
-      // know exists, i.e. the lastEnvelopeOut, and throw it away
+      // outWithDupeFilter - a stream that writes to out, but will filter out
+      // any events that is a dupe of the last envelope out.
+      // This exists because tailing for a query that returns 0
+      // will result in a dead cursor - instead, the tailing cursor uses a
+      // $gte instead of $gt which will create tail that will include the doc we
+      // know exists, i.e. the lastEnvelopeOut, and then we use
+      // outWithDupeFilter to just throw it away.
       var outWithDupeFilter = (function() {
         var strm = _();
         strm.filter(function(x) {
@@ -210,21 +213,16 @@ var EventThing = function(db) {
     },
     push: function(evt) {
       return getCollection()
-        .then(function(coll) {
+        .then(function() {
           return getNextSequence('eventlog-ordinal')
-            .then(function(ordinal) {
-              var deferred = Q.defer();
-              coll.insert({
-                _id: ordinal,
-                body: evt
-              }, deferred.makeNodeResolver())
-              return  deferred.promise;
-            })
-            .then(function() {
-              return syncToDispatch();
-            })
         })
-
+        .then(function(ordinal) {
+          return Q.ninvoke(db.collection('eventlog'), 'insert', {
+            _id: ordinal,
+            body: evt
+          });
+        })
+        .then(syncToDispatch)
     }
   }
 }
