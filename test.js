@@ -42,7 +42,8 @@ describe('when we have a database', function() {
   })
 
   beforeEach(function(done) {
-    db.dropDatabase(function() {
+    db.dropDatabase(function(err) {
+      if (err) { throw err;};
       done()
     });
   })
@@ -69,7 +70,7 @@ describe('when we have a database', function() {
       thing.push({
         hello: 'world'
       }).done()
-    }, 5000)
+    }, 3000)
   })
 
   it('streams after long time two times', function (done){
@@ -85,29 +86,22 @@ describe('when we have a database', function() {
       thing.push({
         hello: 1
       }).done()
-    }, 1000)
+    }, 4000)
 
     setTimeout(function() {
       thing.push({
         hello: 2
       }).done()
-    }, 5000)
-
-    setTimeout(function() {
-      thing.push({
-        hello: 3
-      }).done()
-    }, 10000)
+    }, 8000)
 
     setTimeout(function() {
       assert.deepEqual(arr, [
         { initialEvent: true },
         { hello: 1 },
         { hello: 2 },
-        { hello: 3 },
       ])
       done()
-    },14000)
+    },12000)
   })
 
   it('allows streaming written stuff', function(done) {

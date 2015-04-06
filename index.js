@@ -162,7 +162,10 @@ var EventThing = function(db) {
 
           tailStream.resume();
           tailStream.on('end', function() {
-            setTimeout(startTailing, 1000);
+            // A tail might end pretty fast if there are no records,
+            // so a re-query immidieately might have quite a toll on
+            // the system. Resume after 0-1000ms.
+            setTimeout(startTailing, Math.floor(Math.random()*1000));
           })
           tailStream.pipe(out, { end: false });
         }
