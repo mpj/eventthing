@@ -103,6 +103,7 @@ var EventThing = function(db) {
       .sort({ $natural: -1})
       .limit(1)
       .nextObject(function(err, latest) {
+
         var latestDispatchedOrdinal = !!latest ? latest._id : -1;
         var filter = { _id : { '$gt': latestDispatchedOrdinal } };
         var str = db.collection('eventlog').find(filter).sort({ _id: 1}).stream();
@@ -120,6 +121,9 @@ var EventThing = function(db) {
             if (isDupe) return true; // ignore these
             throw err;
           }))
+          // FIXME I'm pretty sure that we can accidentally cause space
+          // in the sequence here if we don't check that the top item on
+          // stack is the prev id
           db.collection('eventdispatch').insert(x, whenInserted.makeNodeResolver());
         })
 
@@ -166,12 +170,9 @@ var EventThing = function(db) {
         })
 
         function startTailing() {
-          // FIXME: Tailing for a query that returns 0 (which this mostly will)
-          // will result in a dead cursor - instead, we should try to create a
-          // that a tail that will return the doc we know exists, i.e. the
-          // lastEnvelope, and throw it away
+          // FIXME:
           if (!!lastEnvelope)
-            filter._id =  {$gt: lastEnvelope._id};
+            filter._id =  {$gte: lastEnvelope._id};
           var options = {
             tailable: true,
             awaitdata: true,
@@ -188,7 +189,17 @@ var EventThing = function(db) {
             // the system. Resume after 0-1000ms.
             setTimeout(startTailing, Math.floor(Math.random()*1000));
           })
-          tailStream.pipe(out, { end: false });
+
+          _(tailStream)
+            .filter(function(x) {
+              // Tailing for a query that returns 0
+              // will result in a dead cursor - instead, we use a $gte instead
+              // of $gt which will create tail that will return the doc we
+              // know exists, i.e. the lastEnvelope, and throw it away
+              return x._id !== lastEnvelope._id;
+            }).on('data', function(x) {
+              out.write(x)
+            })
         }
 
         bodyStream.on('end', function() {
