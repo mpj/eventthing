@@ -95,6 +95,8 @@ var EventThing = function(db) {
   }
 
   function syncToDispatch() {
+    var deferred = Q.defer();
+
     db
       .collection('eventdispatch')
       .find({})
@@ -104,11 +106,26 @@ var EventThing = function(db) {
         var latestDispatchedOrdinal = !!latest ? latest._id : -1;
         var filter = { _id : { '$gt': latestDispatchedOrdinal } };
         var str = db.collection('eventlog').find(filter).sort({ _id: 1}).stream();
+        var insertionPromises = [];
+        str.on('end', function() {
+          Q.all(insertionPromises).then(function() {
+            deferred.resolve();
+          }).done()
+        })
         str.resume();
         _(str).each(function(x) {
-          db.collection('eventdispatch').insert(x)
+          var whenInserted = Q.defer();
+          insertionPromises.push(whenInserted.promise.fail(function(err) {
+            var isDupe = err.code === 11000;
+            if (isDupe) return true; // ignore these
+            throw err;
+          }))
+          db.collection('eventdispatch').insert(x, whenInserted.makeNodeResolver());
         })
+
       })
+    return deferred.promise;
+
   }
 
   return {
@@ -152,7 +169,7 @@ var EventThing = function(db) {
           // FIXME: Tailing for a query that returns 0 (which this mostly will)
           // will result in a dead cursor - instead, we should try to create a
           // that a tail that will return the doc we know exists, i.e. the
-          // lastEnvelope, and throw it away.
+          // lastEnvelope, and throw it away
           if (!!lastEnvelope)
             filter._id =  {$gt: lastEnvelope._id};
           var options = {
@@ -195,7 +212,7 @@ var EventThing = function(db) {
               return  deferred.promise;
             })
             .then(function() {
-              syncToDispatch();
+              return syncToDispatch();
             })
         })
 
