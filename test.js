@@ -32,31 +32,82 @@ describe('when we have a database', function() {
   this.timeout(4000);
 
   var db;
-  beforeEach(function(done) {
-    var url = 'mongodb://localhost:27017/test-'+Math.floor(Math.random()*10000000);
+  before(function(done) {
+    var rid = Math.floor(Math.random()*10000000);
+    var url = 'mongodb://localhost:27017/test-'+rid;
     MongoClient.connect(url, function(err, x) {
       db = x;
       done()
     });
   })
 
-  afterEach(function() {
-    db.dropDatabase();
+  beforeEach(function(done) {
+    db.dropDatabase(function() {
+      done()
+    });
   })
 
-
   it('streams', function(done) {
+    var thing = EventThing(db)
+    _(thing.subscribe({}))
+      .through(await({ hello: 'worlds'}))
+      .pull(done)
+    setTimeout(function() {
+      thing.push({
+        hello: 'worlds'
+      }).done()
+    }, 100)
+  })
+
+  it('streams (even after long time)', function(done) {
+    this.timeout(8000);
     var thing = EventThing(db)
     _(thing.subscribe({}))
       .through(await({ hello: 'world'}))
       .pull(done)
     setTimeout(function() {
-      console.log("writing");
       thing.push({
         hello: 'world'
       }).done()
-    }, 100)
+    }, 5000)
+  })
 
+  it('streams after long time two times', function (done){
+    this.timeout(15000);
+    var thing = EventThing(db)
+    var arr = []
+    _(thing.subscribe({}))
+      .each(function (x) {
+        arr.push(x)
+      })
+
+    setTimeout(function() {
+      thing.push({
+        hello: 1
+      }).done()
+    }, 1000)
+
+    setTimeout(function() {
+      thing.push({
+        hello: 2
+      }).done()
+    }, 5000)
+
+    setTimeout(function() {
+      thing.push({
+        hello: 3
+      }).done()
+    }, 10000)
+
+    setTimeout(function() {
+      assert.deepEqual(arr, [
+        { initialEvent: true },
+        { hello: 1 },
+        { hello: 2 },
+        { hello: 3 },
+      ])
+      done()
+    },14000)
   })
 
   it('allows streaming written stuff', function(done) {

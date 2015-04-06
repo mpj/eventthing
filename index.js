@@ -144,15 +144,11 @@ var EventThing = function(db) {
           out.write(d)
         })
 
-
-
         out.observe().each(function(x) {
           lastEnvelope = x;
         })
 
-        bodyStream.on('end', function(x) {
-
-
+        function startTailing() {
           if (!!lastEnvelope)
             filter._id =  {$gt: lastEnvelope._id};
           var options = {
@@ -165,11 +161,14 @@ var EventThing = function(db) {
             .stream()
 
           tailStream.resume();
-          tailStream.on('data', function(x) {
-            out.write(x)
+          tailStream.on('end', function() {
+            setTimeout(startTailing, 1000);
           })
-          tailStream.pipe(out);
+          tailStream.pipe(out, { end: false });
+        }
 
+        bodyStream.on('end', function() {
+          startTailing()
         })
 
       }).done()
