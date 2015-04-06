@@ -46,47 +46,48 @@ var EventThing = function(db) {
     return deferred.promise;
   }
 
-  function insert(collectionName, document) {
-    var deferred = Q.defer();
-    db.collection(collectionName).insert(document, deferred.makeNodeResolver())
-    return deferred.promise;
-  }
-
-  function getCollection() {
-    if(!state.whenCollection) {
-
-      var deferred = Q.defer();
+  function ensureCollections() {
+    if(!state.whenCollections) {
 
       var eventLogPromise =
-        ensureCollection('eventlog')
+        Q.ninvoke(db,'createCollection', 'eventlog')
           .then(function() {
-            return insert('eventlog', {
+            var deferred = Q.defer();
+            db.collection('eventlog').insert({
               body: {initialEvent: true},
               _id: 0
-            })
+            }, deferred.makeNodeResolver())
+            return deferred.promise;
           }).fail(throwUnlessDupe)
+
       var eventDispatchPromise =
-        ensureCollection('eventdispatch', { capped: true, size: 100000 })
+        Q.ninvoke(db, 'createCollection', 'eventdispatch', { capped: true, size: 100000 })
           .then(function() {
-            return insert('eventdispatch', {
+            var deferred = Q.defer();
+            db.collection('eventlog').insert({
               body: {initialEvent: true},
               _id: 0
-            })
+            }, deferred.makeNodeResolver())
+            return deferred.promise;
           })
           .fail(throwUnlessDupe)
-      var whenOrdinalCounter = insert('counters', {
-        _id: "eventlog-ordinal",
-        seq: 0
-      }).fail(throwUnlessDupe);
-      Q.all([eventLogPromise, eventDispatchPromise,whenOrdinalCounter]).then(function() {
-        deferred.resolve()
-      }).done()
-      state.whenCollection = deferred.promise;
+
+      var whenOrdinalCounter = (function() {
+        var deferred = Q.defer();
+        db.collection('counters').insert({
+          _id: "eventlog-ordinal",
+          seq: 0
+        }, deferred.makeNodeResolver())
+        return deferred.promise;
+      })().fail(throwUnlessDupe);
+
+
+      state.whenCollections =
+        Q.all([eventLogPromise, eventDispatchPromise,whenOrdinalCounter])
+          .then(function() { return true; });
     }
 
-    return state.whenCollection.then(function(){
-      return db.collection('eventlog')
-    });
+    return state.whenCollections;
   }
 
   function syncToDispatch() {
@@ -172,13 +173,13 @@ var EventThing = function(db) {
         return strm;
       })();
 
-      getCollection().then(function(coll) {
+      ensureCollections().then(function(coll) {
 
         var filter = {}
         if (!!opts.offset)
           filter._id = { '$gte': opts.offset };
 
-        var bodyStream = coll.find(filter)
+        var bodyStream = db.collection('eventlog').find(filter)
           .sort({ _id: 1})
           .stream();
         bodyStream.pipe(outWithBrokenChainFilter, { end: false });
@@ -212,7 +213,7 @@ var EventThing = function(db) {
 
     },
     push: function(evt) {
-      return getCollection()
+      return ensureCollections()
         .then(function() {
           return getNextSequence('eventlog-ordinal')
         })
