@@ -95,7 +95,6 @@ var EventThing = function(db) {
     });
   }
 
-  var total = 0;
   function syncToDispatch() {
     var deferred = Q.defer();
 
