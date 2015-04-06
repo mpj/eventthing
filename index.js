@@ -106,32 +106,32 @@ var EventThing = function(db) {
       var latestDispatchedOrdinal = !!latest ? latest._id : -1;
       var filter = { _id : { '$gt': latestDispatchedOrdinal } };
       return Q.ninvoke(
-        db.collection('eventlog').find(filter).sort({ _id: 1}), 'toArray');
+        db.collection('eventlog').find(filter).sort({ _id: 1}), 'toArray')
+          .then(function(result) {
+            // Create an unbroken chain, throw away items after gap
+            // i.e. 0,1,2,4,5 becomes 0,1,2
+            return result.reduce(function(prev, cur, index, arr) {
+              if(prev.length === 0 || prev[prev.length-1]._id === cur._id-1)
+                prev.push(cur);
+              return prev;
+            }, []);
+          });
     })
-    .then(function(result) {
-      // Create an unbroken chain, throw away items after gap
-      // i.e. 0,1,2,4,5 becomes 0,1,2
-      result = result.reduce(function(prev, cur, index, arr) {
-        if(prev.length === 0 || prev[prev.length-1]._id === cur._id-1)
-          prev.push(cur);
-        return prev;
-      }, []);
+    .then(function(loggedEventsToDispatch) {
+      // Return if work needs to be done
+      if (loggedEventsToDispatch.length === 0) return true;
 
-      if (result.length === 0) {
-        // No work needs to be done
-        return true
-      } else {
-        return Q.ninvoke(
-          db.collection('eventdispatch'),
-          'insert',
-          result,
-          { ordered: true }
-        ).fail(function(error) {
-          var isDupe = error.code === 11000;
-          if (isDupe) return true;
-          throw error;
-        })
-      }
+      return Q.ninvoke(
+        db.collection('eventdispatch'),
+        'insert',
+        loggedEventsToDispatch,
+        { ordered: true }
+      )
+      .fail(function(error) {
+        var isDupe = error.code === 11000;
+        if (isDupe) return true;
+        throw error;
+      })
     }).then(function() {
       return true
     })
