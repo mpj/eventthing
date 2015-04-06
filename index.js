@@ -98,17 +98,17 @@ var EventThing = function(db) {
   var total = 0;
   function syncToDispatch() {
     var deferred = Q.defer();
+
     db
       .collection('eventdispatch')
       .find({})
       .sort({ $natural: -1})
       .limit(1)
       .nextObject(function(err, latest) {
-
-        var restStart = Number(new Date());
         var latestDispatchedOrdinal = !!latest ? latest._id : -1;
         var filter = { _id : { '$gt': latestDispatchedOrdinal } };
         db.collection('eventlog').find(filter).sort({ _id: 1}).toArray(function(err, result) {
+          if (err) return deferred.reject(err);
           result = result.reduce(function(prev, cur, index, arr) {
             if(prev.length === 0 || prev[prev.length-1]._id === cur._id-1)
               prev.push(cur);
