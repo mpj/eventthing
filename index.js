@@ -15,6 +15,12 @@ var argInspector = function() {
 
 var EventThing = function(db) {
 
+  function throwUnlessDupe(error) {
+    var isDupe = error.code === 11000;
+    if (isDupe) return true;
+    throw error;
+  }
+
   var state = {}
 
   function getNextSequence(name) {
@@ -58,11 +64,7 @@ var EventThing = function(db) {
               body: {initialEvent: true},
               _id: 0
             })
-          }).fail(function (error) {
-            var isDupe = error.code === 11000;
-            if (isDupe) return true;
-            throw error;
-          })
+          }).fail(throwUnlessDupe)
       var eventDispatchPromise =
         ensureCollection('eventdispatch', { capped: true, size: 100000 })
           .then(function() {
@@ -71,19 +73,11 @@ var EventThing = function(db) {
               _id: 0
             })
           })
-          .fail(function (error) {
-            var isDupe = error.code === 11000;
-            if (isDupe) return true;
-            throw error;
-          })
+          .fail(throwUnlessDupe)
       var whenOrdinalCounter = insert('counters', {
         _id: "eventlog-ordinal",
         seq: 0
-      }).fail(function (error) {
-        var isDupe = error.code === 11000;
-        if (isDupe) return true;
-        throw error;
-      });
+      }).fail(throwUnlessDupe);
       Q.all([eventLogPromise, eventDispatchPromise,whenOrdinalCounter]).then(function() {
         deferred.resolve()
       }).done()
@@ -127,11 +121,7 @@ var EventThing = function(db) {
         loggedEventsToDispatch,
         { ordered: true }
       )
-      .fail(function(error) {
-        var isDupe = error.code === 11000;
-        if (isDupe) return true;
-        throw error;
-      })
+      .fail(throwUnlessDupe)
     }).then(function() {
       return true
     })
