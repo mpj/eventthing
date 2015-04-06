@@ -143,6 +143,42 @@ var EventThing = function(db) {
       opts.conditions = opts.conditions || {}
 
       var out = _()
+      var lastEnvelopeOut = null;
+      out.observe().each(function(x) { lastEnvelopeOut = x; })
+
+      // outWithBrokenChainFilter - astream that writes to out,
+      // but that first filters out items that would break the chain.
+      // I.e. if an event with an _id of 4 has just been written,
+      // 5 can be written afterwards, but 6 would be filtered out unless
+      // was written first.
+      var outWithBrokenChainFilter = (function() {
+        var strm = _()
+        var chainIsBroken = false;
+        strm
+          .filter(function(x) {
+            chainIsBroken =
+              chainIsBroken || (
+                lastEnvelopeOut     !== null &&
+                lastEnvelopeOut._id !== x._id - 1
+              );
+            return !chainIsBroken;
+          })
+          .pipe(out)
+        return strm;
+      })();
+
+      // Tailing for a query that returns 0
+      // will result in a dead cursor - instead, we use a $gte instead
+      // of $gt which will create tail that will return the doc we
+      // know exists, i.e. the lastEnvelopeOut, and throw it away
+      var outWithDupeFilter = (function() {
+        var strm = _();
+        strm.filter(function(x) {
+          return x._id !== lastEnvelopeOut._id;
+        }).pipe(out);
+        return strm;
+      })();
+
       getCollection().then(function(coll) {
 
         var filter = {}
@@ -152,64 +188,32 @@ var EventThing = function(db) {
         var bodyStream = coll.find(filter)
           .sort({ _id: 1})
           .stream();
-        bodyStream.resume();
-        var lastEnvelope = null;
-        var chainIsBroken = false;
-        _(bodyStream).filter(function(x) {
-          chainIsBroken =
-            chainIsBroken ||
-            (lastEnvelope !== null &&
-            lastEnvelope._id !== x._id-1);
-          if (!chainIsBroken) {
-            lastEnvelope = x;
-            return true;
-          } else {
-            return false
-          }
-        }).on('data', function(d) {
-          out.write(d)
-        })
-
-        out.observe().each(function(x) {
-          lastEnvelope = x;
-        })
+        bodyStream.pipe(outWithBrokenChainFilter, { end: false });
+        bodyStream.on('end', function() { startTailing() });
 
         function startTailing() {
-          if (!!lastEnvelope)
-            filter._id =  {$gte: lastEnvelope._id};
-          var options = {
-            tailable: true,
-            awaitdata: true,
-            numberOfRetries: -1
-          }
-          var tailStream = db.collection('eventdispatch')
-            .find(filter, options)
-            .stream()
+          if (!!lastEnvelopeOut)
+            filter._id =  { '$gte': lastEnvelopeOut._id };
 
-          tailStream.resume();
+          var tailStream =
+            db.collection('eventdispatch')
+              .find(filter, {
+                tailable: true,
+                awaitdata: true,
+                numberOfRetries: -1
+              })
+              .stream();
+
+          tailStream.resume(); // Resume is needed for the tailable cursor, not
+                               // completely sure why.
+          tailStream.pipe(outWithDupeFilter, { end: false });
           tailStream.on('end', function() {
             // A tail might end pretty fast if there are no records,
             // so a re-query immidieately might have quite a toll on
             // the system. Resume after 0-1000ms.
             setTimeout(startTailing, Math.floor(Math.random()*1000));
           })
-
-          _(tailStream)
-            .filter(function(x) {
-              // Tailing for a query that returns 0
-              // will result in a dead cursor - instead, we use a $gte instead
-              // of $gt which will create tail that will return the doc we
-              // know exists, i.e. the lastEnvelope, and throw it away
-              return x._id !== lastEnvelope._id;
-            }).on('data', function(x) {
-              out.write(x)
-            })
         }
-
-        bodyStream.on('end', function() {
-          startTailing()
-        })
-
       }).done()
       return out.map(prop('body'));
 
