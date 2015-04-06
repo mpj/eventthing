@@ -149,6 +149,10 @@ var EventThing = function(db) {
         })
 
         function startTailing() {
+          // FIXME: Tailing for a query that returns 0 (which this mostly will)
+          // will result in a dead cursor - instead, we should try to create a
+          // that a tail that will return the doc we know exists, i.e. the
+          // lastEnvelope, and throw it away.
           if (!!lastEnvelope)
             filter._id =  {$gt: lastEnvelope._id};
           var options = {
