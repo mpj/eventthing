@@ -247,9 +247,7 @@ describe('when we have a database', function() {
           return { hello: i}
         })
         .each(function (x){
-          thing.push(x).then(function() {
-            insertTime += (insertEnd-insertStart);
-          })
+          thing.push(x).done()
         })
       }, 1000)
     }).done()
