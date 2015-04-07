@@ -46,7 +46,13 @@ describe('when we have a database', function() {
   })
 
   beforeEach(function(done) {
-    db.dropDatabase(function(err) {
+    setTimeout(function (){
+      db.dropDatabase(function(err) {
+
+        if (err) { throw err;};
+        setTimeout(done, 1000);
+      });
+    }, 2000); // wait for operations to finish
 
       if (err) { throw err;};
       setTimeout(done, 1000);
