@@ -1,7 +1,8 @@
 var Q = require('q')
 var _ = require('highland')
 var prop = require('mout/function/prop')
-var debounce = require('just-debounce')
+var range = require('mout/array/range')
+
 var inspector = function (name) {
   name = name || 'inspectooor'
   return function(x) {
@@ -14,36 +15,42 @@ var argInspector = function() {
 }
 
 var EventThing = function(db) {
-
+  
   function throwUnlessDupe(error) {
     var isDupe = error.code === 11000;
-    if (isDupe) return true;
+    if (isDupe) { return true; }
     throw error;
   }
 
   var state = {}
 
-  function getNextSequence(name) {
-    return Q.ninvoke(db.collection('counters'), 'findAndModify',
-      { '_id': name },
-      null,
-      { '$inc': { seq: 1 } },
-      {new: true}
-    ).then(function(doc) {
-      return doc.value.seq;
-    })
-  }
+  function populatePlaceholders(max) {
+    return Q.ninvoke(db
+        .collection('eventlog'),
+        'count',
+        { body: { $exists: false } }
+      )
+      .then(function(placeHolderCount) {
+        if (placeHolderCount > 50000) return;
+        return Q.ninvoke(db
+          .collection('eventlog')
+          .find({})
+          .sort({ _id: -1 })
+          .limit(1), 'nextObject')
+          .then(function(latestPlaceHolder) {
 
-  function ensureCollection(name, opts) {
-    opts = opts || {}
-    var deferred = Q.defer();
-    db.createCollection(name, opts, function(err) {
-      if (err)
-        deferred.reject(err);
-      else
-        deferred.resolve(db.collection(name));
-    });
-    return deferred.promise;
+            var latestLoggedOrdinal = !!latestPlaceHolder ? latestPlaceHolder._id : -1;
+            var docs = range(1, max ? 999 : 10).map(function(i) {
+              return { _id: latestLoggedOrdinal + i }
+            })
+
+            return Q.ninvoke(db.collection('eventlog'), 'insert', docs, { ordered: true } )
+              .fail(throwUnlessDupe)
+              .then(function(res) {
+                return true;
+              });
+          })
+      });
   }
 
   function ensureCollections() {
@@ -84,11 +91,17 @@ var EventThing = function(db) {
 
       state.whenCollections =
         Q.all([eventLogPromise, eventDispatchPromise,whenOrdinalCounter])
-          .then(function() { return true; });
+          .then(populatePlaceholders)
+          .then(function() {
+            return true;
+          })
+
     }
 
     return state.whenCollections;
   }
+
+
 
   function syncToDispatch() {
     return Q.ninvoke(
@@ -99,7 +112,10 @@ var EventThing = function(db) {
         .limit(1), 'nextObject')
     .then(function(latest) {
       var latestDispatchedOrdinal = !!latest ? latest._id : -1;
-      var filter = { _id : { '$gt': latestDispatchedOrdinal } };
+      var filter = {
+        _id : { '$gt': latestDispatchedOrdinal },
+        body: { '$exists': true }
+      };
       return Q.ninvoke(
         db.collection('eventlog').find(filter).sort({ _id: 1}), 'toArray')
           .then(function(result) {
@@ -112,6 +128,7 @@ var EventThing = function(db) {
             }, []);
           });
     })
+
     .then(function(loggedEventsToDispatch) {
       // Return if work needs to be done
       if (loggedEventsToDispatch.length === 0) return true;
@@ -123,10 +140,14 @@ var EventThing = function(db) {
         { ordered: true }
       )
       .fail(throwUnlessDupe)
-    }).then(function() {
+    })
+    .then(function() {
       return true
     })
   }
+
+
+
 
   return {
     subscribe: function(opts) {
@@ -175,7 +196,9 @@ var EventThing = function(db) {
 
       ensureCollections().then(function(coll) {
 
-        var filter = {}
+        var filter = {
+          body: { '$exists': true }
+        }
         if (!!opts.offset)
           filter._id = { '$gte': opts.offset };
 
@@ -215,15 +238,23 @@ var EventThing = function(db) {
     push: function(evt) {
       return ensureCollections()
         .then(function() {
-          return getNextSequence('eventlog-ordinal')
+          return Q.ninvoke(db.collection('eventlog'), 'findAndModify',
+            { body: { $exists: false } },
+            [['_id', 1]],
+            { $set: {body: evt} },
+            { w: 1, j: 1, wtimeout: 5000, new:true }
+          )
         })
-        .then(function(ordinal) {
-          return Q.ninvoke(db.collection('eventlog'), 'insert', {
-            _id: ordinal,
-            body: evt
-          });
+        .then(function(res) {
+          if (!res.value) {
+            throw new Error('Could not insert value at pos')
+          }
         })
         .then(syncToDispatch)
+        .then(populatePlaceholders)
+        .then(function() {
+          return true
+        })
     }
   }
 }
