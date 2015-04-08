@@ -15,7 +15,7 @@ var argInspector = function() {
 }
 
 var EventThing = function(db) {
-  
+
   function throwUnlessDupe(error) {
     var isDupe = error.code === 11000;
     if (isDupe) { return true; }
@@ -79,18 +79,8 @@ var EventThing = function(db) {
           })
           .fail(throwUnlessDupe)
 
-      var whenOrdinalCounter = (function() {
-        var deferred = Q.defer();
-        db.collection('counters').insert({
-          _id: "eventlog-ordinal",
-          seq: 0
-        }, deferred.makeNodeResolver())
-        return deferred.promise;
-      })().fail(throwUnlessDupe);
-
-
       state.whenCollections =
-        Q.all([eventLogPromise, eventDispatchPromise,whenOrdinalCounter])
+        Q.all([eventLogPromise, eventDispatchPromise])
           .then(populatePlaceholders)
           .then(function() {
             return true;

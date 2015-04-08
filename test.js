@@ -162,10 +162,6 @@ describe('when we have a database', function() {
 
   describe('items with space is in the event-log', function() {
     beforeEach(function(done) {
-      Q.ninvoke(db.collection('counters'), 'insert', {
-        _id: "eventlog-ordinal",
-        seq: 0
-      })
       db.collection('eventlog').insert({ _id: 0, body: { hello: 0 } })
       db.collection('eventlog').insert({ _id: 1, body: { hello: 1 } })
       db.collection('eventlog').insert({ _id: 3, body: { hello: 3 } })
@@ -196,10 +192,6 @@ describe('when we have a database', function() {
 
   describe('items out of order is in eventlog collection', function() {
     beforeEach(function(done) {
-      Q.ninvoke(db.collection('counters'), 'insert', {
-        _id: "eventlog-ordinal",
-        seq: 0
-      })
       db.collection('eventlog').insert({ _id: 1, body: { hello: 1 } })
       db.collection('eventlog').insert({ _id: 0, body: { hello: 0 } })
       db.collection('eventlog').insert({ _id: 3, body: { hello: 3 } })
